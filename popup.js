@@ -52,9 +52,10 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         if (response && response.success) {
-          showStatus('Email composed successfully!', 'success');
+          const message = response.message || 'Email composed successfully!';
+          showStatus(message, 'success');
           // Close popup after success
-          setTimeout(() => window.close(), 1500);
+          setTimeout(() => window.close(), 2000);
         } else {
           showStatus(response?.error || 'Failed to compose email', 'error');
         }

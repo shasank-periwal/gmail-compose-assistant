@@ -36,7 +36,7 @@ class GmailComposeAssistant {
 
   async handleComposeEmail(request, sendResponse) {
     try {
-      console.log('Starting compose email process...');
+      console.log('🚀 Starting compose email process...');
       
       if (!this.isReady) {
         await this.waitForGmail();
@@ -51,34 +51,49 @@ class GmailComposeAssistant {
         return;
       }
 
-      console.log('Found compose window:', composeWindow);
+      console.log('✅ Found compose window:', composeWindow);
 
-      // Step 1: Extract recipient name and add greeting
+      // Step 1: Extract recipient name FIRST (before any injection)
+      console.log('📧 Extracting recipient name...');
       const recipientName = this.extractRecipientName(composeWindow);
-      console.log('Extracted recipient name:', recipientName);
+      console.log('📧 Recipient name result:', recipientName);
       
       // Step 2: Inject subject
       if (request.subject) {
-        console.log('Injecting subject...');
+        console.log('📝 Injecting subject:', request.subject);
         this.injectSubject(composeWindow, request.subject);
       }
 
-      // Step 3: Inject body with greeting
-      if (request.body) {
-        console.log('Injecting body with greeting...');
-        const greeting = recipientName ? `Hi ${recipientName},\n\n` : '';
-        const fullBody = greeting + request.body;
-        this.injectBody(composeWindow, fullBody);
+      // Step 3: Create body with greeting
+      let finalBody = request.body || '';
+      if (recipientName) {
+        console.log('👋 Adding greeting for:', recipientName);
+        finalBody = `Hi ${recipientName},\n\n${request.body || ''}`;
+      } else {
+        console.log('❌ No recipient name found, using generic greeting');
+        finalBody = `Hi,\n\n${request.body || ''}`;
       }
 
-      // Step 4: Attach file
-      console.log('Attempting to attach file...');
+      // Step 4: Inject the complete body
+      if (finalBody.trim()) {
+        console.log('📄 Injecting final body:', finalBody.substring(0, 100) + '...');
+        this.injectBody(composeWindow, finalBody);
+      }
+
+      // Step 5: Attach file
+      console.log('📎 Attempting to attach file...');
       await this.attachFile(composeWindow);
 
-      console.log('All compose operations completed successfully');
-      sendResponse({ success: true });
+      console.log('✅ All compose operations completed successfully');
+      
+      // Provide detailed feedback
+      const resultMessage = recipientName 
+        ? `Email composed with greeting for ${recipientName}!`
+        : 'Email composed (no recipient name found for personalization)';
+        
+      sendResponse({ success: true, message: resultMessage });
     } catch (error) {
-      console.error('Gmail Compose Assistant Error:', error);
+      console.error('❌ Gmail Compose Assistant Error:', error);
       sendResponse({ success: false, error: error.message });
     }
   }
@@ -161,67 +176,102 @@ class GmailComposeAssistant {
 
   extractRecipientName(composeWindow) {
     try {
+      console.log('Starting name extraction...');
+      
       // More comprehensive selectors for Gmail's To field
       const selectors = [
         // Standard input field
         'input[name="to"]',
         'input[aria-label*="To" i]',
-        // Gmail's recipient display elements
+        // Gmail's recipient display elements (chips/tags)
         '.vR .vN',
-        '.vR .go .vN',
+        '.vR .go .vN', 
         '.oL.aDm .vN',
+        'span.vN',
         // Contenteditable fields
         '[contenteditable="true"][aria-label*="To" i]',
         // Search in broader compose area
         '.aoD .vR input',
         '.GS .vR input',
+        '.vR input',
         // Alternative selectors
         '[role="textbox"][aria-label*="To" i]',
         '.vR [email]',
-        '.vR span[email]'
+        '.vR span[email]',
+        'span[email]',
+        // Direct email attributes
+        '[data-hovercard-id*="@"]',
+        '[title*="@"]'
       ];
 
       let email = '';
       
-      // Try each selector
+      // Try each selector on the entire document (not just compose window)
       for (const selector of selectors) {
         const elements = document.querySelectorAll(selector);
+        console.log(`Trying selector: ${selector}, found ${elements.length} elements`);
+        
         for (const element of elements) {
-          const value = element.value || element.textContent || element.innerText || element.getAttribute('email') || '';
-          console.log('Checking element:', selector, 'Value:', value);
+          const value = element.value || 
+                       element.textContent || 
+                       element.innerText || 
+                       element.getAttribute('email') ||
+                       element.getAttribute('data-hovercard-id') ||
+                       element.getAttribute('title') || 
+                       '';
+          
+          console.log('  Element value:', value.substring(0, 100));
           
           if (value && value.includes('@')) {
-            email = value;
+            email = value.trim();
+            console.log('Found email with selector:', selector, 'Email:', email);
             break;
           }
         }
         if (email.includes('@')) break;
       }
 
-      // If still no email, try a broader search
+      // If still no email, search for any text containing @ symbol
       if (!email.includes('@')) {
-        const allInputs = document.querySelectorAll('input[type="email"], input[type="text"], [contenteditable="true"]');
+        console.log('Trying broader email search...');
+        const allElements = document.querySelectorAll('*');
+        for (const element of allElements) {
+          const text = element.textContent || element.innerText || '';
+          const emailMatch = text.match(/[\w\.-]+@[\w\.-]+\.\w+/);
+          if (emailMatch && text.length < 200) { // Avoid long text blocks
+            email = emailMatch[0];
+            console.log('Found email in text content:', email);
+            break;
+          }
+        }
+      }
+
+      // Try to find in input values
+      if (!email.includes('@')) {
+        console.log('Checking all input values...');
+        const allInputs = document.querySelectorAll('input');
         for (const input of allInputs) {
-          const value = input.value || input.textContent || input.innerText || '';
-          if (value && value.includes('@') && value.includes('.')) {
+          const value = input.value || '';
+          if (value.includes('@')) {
             email = value;
-            console.log('Found email in broader search:', email);
+            console.log('Found email in input value:', email);
             break;
           }
         }
       }
 
       if (!email || !email.includes('@')) {
-        console.log('No email found in To field');
+        console.log('❌ No email found in To field after all attempts');
         return null;
       }
 
-      console.log('Extracted email:', email);
+      console.log('✅ Raw email found:', email);
 
       // Clean up email (remove extra text, spaces, etc.)
       const emailMatch = email.match(/[\w\.-]+@[\w\.-]+\.\w+/);
       if (emailMatch) {
         email = emailMatch[0];
+        console.log('Cleaned email:', email);
       }
 
       // Extract name from email
@@ -229,13 +279,13 @@ class GmailComposeAssistant {
       const nameParts = emailPart.split(/[._-]/);
       const firstName = nameParts[0];
       
-      // Capitalize first letter
+      // Capitalize first letter and make rest lowercase
       const formattedName = firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase();
-      console.log('Extracted name:', formattedName);
+      console.log('✅ Final extracted name:', formattedName);
       
       return formattedName;
     } catch (error) {
-      console.warn('Could not extract recipient name:', error);
+      console.error('❌ Error in name extraction:', error);
       return null;
     }
   }
